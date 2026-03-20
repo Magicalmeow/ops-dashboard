@@ -1,0 +1,19 @@
+{
+  "open_trades": [
+    {
+      "id": "i9j0k1l2",
+      "market_slug": "btc-above-91k",
+      "direction": "UP",
+      "entry_price": 0.55,
+      "shares": 12.00
+    }
+  ],
+  "traded_markets": ["btc-above-90k", "eth-above-3500", "btc-above-91k"],
+  "portfolio": {
+    "starting_balance": 500.00,
+    "balance": 497.74,
+    "high_water_mark": 503.50,
+    "total_invested": 230.00,
+    "total_returned": 227.74
+  }
+}

@@ -1,0 +1,5 @@
+timestamp	strategy	scan_id	city	bracket	target_date	direction	entry_price	model_prob	market_prob	edge	edge_threshold	confidence	hours_ahead	sources	suggested_size	market_id	metric
+2026-03-20T14:05:00	ensemble	1	New York	>=50.0F	2026-03-21	yes	0.6000	0.7500	0.6000	0.1500	0.0800	0.8500	18.0	GFS|ECMWF	15.00	cond_abc123	high_temperature
+2026-03-20T14:05:00	ensemble	1	Atlanta	>=60.0F	2026-03-21	no	0.5500	0.3200	0.4500	0.1300	0.0800	0.7900	18.0	GFS|NBM	12.00	cond_def456	high_temperature
+2026-03-20T14:06:00	coldmath_no	1	Miami	>=75.0F	2026-03-21	no	0.1500	0.0800	0.1500	0.0700	0.0500	0.9100	18.0	GFS	8.00	cond_ghi789	high_temperature
+2026-03-19T10:05:00	ensemble	0	Phoenix	>=80.0F	2026-03-20	no	0.3000	0.2100	0.3000	0.0900	0.0800	0.8000	20.0	ECMWF	10.00	cond_jkl012	high_temperature

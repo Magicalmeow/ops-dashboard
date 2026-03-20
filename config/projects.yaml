@@ -1,0 +1,58 @@
+# Ops Dashboard Project Configuration
+# Priority order: lower number = higher priority
+
+telegram:
+  bot_token: ""  # Set via environment: OPS_DASHBOARD_BOT_TOKEN
+  chat_id: ""    # Set via environment: OPS_DASHBOARD_CHAT_ID
+
+blocker_thresholds:
+  no_trades_hours: 48
+  stale_pnl_days: 3
+  no_commits_days: 5
+
+projects:
+  - name: "Weather Bot"
+    priority: 1
+    collector_type: "trading_weather"
+    base_path: "/root/polymarket-kalshi-weather-bot"
+    paths:
+      signal_log: "signal_log.tsv"
+      paper_trades: "paper_trades.tsv"
+      portfolio_state_dir: "data_cache/weather_paper"
+    fallback_base: "/opt/wx-bot"
+
+  - name: "Market Maker"
+    priority: 2
+    collector_type: "trading_mm"
+    base_path: "/root/polymarket-kalshi-weather-bot"
+    paths:
+      equity_curve: "data_cache/mm_paper/equity_curve.tsv"
+      session_dir: "research/mm_research/data"
+
+  - name: "Equity Engine"
+    priority: 3
+    collector_type: "git"
+    base_path: "/root/conviction-equity-engine"
+    github_repo: "Magicalmeow/conviction-equity-engine"
+
+  - name: "Auto Research"
+    priority: 4
+    collector_type: "git"
+    base_path: "/root/autoresearch"
+    github_repo: "Magicalmeow/autoresearch"
+
+  - name: "Decoded Crypto"
+    priority: 5
+    collector_type: "trading_decoded"
+    base_path: "/root/polymarket-kalshi-weather-bot"
+    paths:
+      trades_dir: "data_cache/paper_trading"
+      state_dir: "data_cache/paper_trading"
+
+  - name: "Crypto Momentum"
+    priority: 6
+    collector_type: "trading_momentum"
+    base_path: "/root/polymarket-kalshi-weather-bot"
+    paths:
+      trades: "data_cache/momentum_trading/momentum_trades.tsv"
+      state: "data_cache/momentum_trading/momentum_state.json"

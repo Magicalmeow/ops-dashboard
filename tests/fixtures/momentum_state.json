@@ -1,0 +1,19 @@
+{
+  "balance": 496.90,
+  "high_water_mark": 500.00,
+  "killed": false,
+  "open_positions": [
+    {
+      "id": "u9v0w1x2",
+      "slug": "eth-up-4h",
+      "asset": "eth",
+      "entry_price": 0.60,
+      "shares": 10.00,
+      "cost_basis": 6.00
+    }
+  ],
+  "stats": {
+    "eth_5m": {"wins": 1, "losses": 0, "total_pnl": 6.60},
+    "sol_15m": {"wins": 0, "losses": 1, "total_pnl": -2.70}
+  }
+}

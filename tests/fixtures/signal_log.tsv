@@ -1,0 +1,6 @@
+timestamp	strategy	scan_id	city	bracket	target_date	direction	model_prob	market_prob	edge	hours_ahead	passes_threshold
+2026-03-20T14:00:00	ensemble	1	New York	>=50.0F	2026-03-21	yes	0.7500	0.6000	0.1500	18.0	True
+2026-03-20T14:00:00	ensemble	1	Atlanta	>=60.0F	2026-03-21	no	0.3200	0.4500	-0.1300	18.0	True
+2026-03-20T14:00:00	ensemble	1	Dallas	>=70.0F	2026-03-21	yes	0.8100	0.7200	0.0900	18.0	False
+2026-03-20T14:00:00	ensemble	1	Miami	>=75.0F	2026-03-21	yes	0.9200	0.8500	0.0700	18.0	True
+2026-03-19T10:00:00	ensemble	0	Phoenix	>=80.0F	2026-03-20	no	0.2100	0.3000	-0.0900	20.0	True

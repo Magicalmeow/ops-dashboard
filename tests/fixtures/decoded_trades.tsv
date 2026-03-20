@@ -1,0 +1,4 @@
+id	timestamp	market_slug	direction	side	entry_price	shares	strategy	rule	confidence	btc_price	btc_pct_5m	resolved	resolution	exit_price	pnl	mode
+a1b2c3d4	2026-03-19T10:00:00	btc-above-90k	UP	YES	0.6500	10.00	hgjghjh85_directional	rule_1	0.750	89500.00	0.001200	True	WIN	1.0000	3.5000	paper
+e5f6g7h8	2026-03-19T14:00:00	eth-above-3500	UP	YES	0.7200	8.00	hgjghjh85_directional	strong_btc_momentum	0.820	90100.00	0.002100	True	LOSS	0.0000	-5.7600	paper
+i9j0k1l2	2026-03-20T08:00:00	btc-above-91k	UP	YES	0.5500	12.00	hgjghjh85_directional	rule_1	0.680	90800.00	0.000800	False		0.0000	0.0000	paper

@@ -1,0 +1,20 @@
+{
+  "timestamp": "2026-03-20T16:00:00",
+  "duration_min": 480,
+  "cycles": 960,
+  "total_markets": 200,
+  "pnl": {
+    "starting_cash": 2000.00,
+    "cash": 2005.10,
+    "inventory_value": 21.50,
+    "equity": 2026.60,
+    "return_pct": 1.33,
+    "reward_estimate": 82.59
+  },
+  "categories": {
+    "sports": {"markets": 120, "fills": 145, "merges": 12, "gross_pnl": 18.50},
+    "weather": {"markets": 50, "fills": 15, "merges": 2, "gross_pnl": 5.80},
+    "politics": {"markets": 20, "fills": 5, "merges": 0, "gross_pnl": 1.30},
+    "other": {"markets": 10, "fills": 2, "merges": 0, "gross_pnl": 1.00}
+  }
+}
