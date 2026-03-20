@@ -10,7 +10,7 @@ import csv
 import glob
 import json
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from src.collectors.base import BaseCollector
 from src.models import ProjectMetrics
@@ -30,7 +30,11 @@ class WeatherCollector(BaseCollector):
 
             signal_path = self._find_file(base, fallback, paths["signal_log"])
             trades_path = self._find_file(base, fallback, paths["paper_trades"])
+
+            # Portfolio state — try base, then fallback
             state_dir = os.path.join(base, paths["portfolio_state_dir"])
+            if not os.path.isdir(state_dir) and fallback:
+                state_dir = os.path.join(fallback, paths["portfolio_state_dir"])
 
             # Signals (last 24h, passes_threshold=True)
             if signal_path:
@@ -63,6 +67,13 @@ class WeatherCollector(BaseCollector):
                 return secondary
         return None
 
+    def _parse_timestamp(self, ts: str) -> datetime:
+        """Parse ISO timestamp, stripping timezone to compare with UTC naive."""
+        dt = datetime.fromisoformat(ts)
+        if dt.tzinfo is not None:
+            dt = dt.replace(tzinfo=None)
+        return dt
+
     def _count_signals(self, path: str) -> int:
         """Count signals with passes_threshold=True in last 24h."""
         cutoff = datetime.utcnow() - timedelta(hours=24)
@@ -70,14 +81,14 @@ class WeatherCollector(BaseCollector):
         with open(path, "r") as f:
             reader = csv.DictReader(f, delimiter="\t")
             for row in reader:
-                if row.get("passes_threshold", "").strip() == "True":
+                if (row.get("passes_threshold") or "").strip() == "True":
                     ts = row.get("timestamp", "")
                     try:
-                        dt = datetime.fromisoformat(ts.replace("Z", "+00:00").replace("+00:00", ""))
+                        dt = self._parse_timestamp(ts)
                         if dt >= cutoff:
                             count += 1
                     except (ValueError, TypeError):
-                        count += 1  # If can't parse timestamp, count it anyway
+                        count += 1
         return count
 
     def _count_trades(self, path: str) -> int:
@@ -89,7 +100,7 @@ class WeatherCollector(BaseCollector):
             for row in reader:
                 ts = row.get("timestamp", "")
                 try:
-                    dt = datetime.fromisoformat(ts.replace("Z", "+00:00").replace("+00:00", ""))
+                    dt = self._parse_timestamp(ts)
                     if dt >= cutoff:
                         count += 1
                 except (ValueError, TypeError):
