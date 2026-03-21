@@ -5,6 +5,9 @@ telegram:
   bot_token: ""  # Set via environment: OPS_DASHBOARD_BOT_TOKEN
   chat_id: ""    # Set via environment: OPS_DASHBOARD_CHAT_ID
 
+notion:
+  page_id: ""    # Set via environment: NOTION_PAGE_ID
+
 blocker_thresholds:
   no_trades_hours: 48
   stale_pnl_days: 3
