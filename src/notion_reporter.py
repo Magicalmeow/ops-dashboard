@@ -5,6 +5,7 @@ Creates two databases under a target page:
   2. Daily History — one row per project per day (trends over time)
 
 Opt-in: only runs if NOTION_TOKEN env var is set.
+Uses requests directly (no SDK version headaches).
 """
 
 import json
@@ -12,48 +13,50 @@ import logging
 import os
 from datetime import datetime, timezone
 
-from notion_client import Client
+import requests
 
 from src.models import Alert, DailyReport, ProjectMetrics
 
 logger = logging.getLogger(__name__)
 
-# Status labels matching status_engine.py indicators
-STATUS_MAP = {
-    "[OK]": "OK",
-    "[WIP]": "WIP",
-    "[PAUSE]": "Paused",
-    "[BLOCKED]": "Blocked",
-    "[ERROR]": "Error",
-}
+API_BASE = "https://api.notion.com/v1"
+NOTION_VERSION = "2022-06-28"
 
 
 class NotionReporter:
 
     def __init__(self, token: str = "", page_id: str = "", ids_cache: str = ""):
         self.token = token or os.environ.get("NOTION_TOKEN", "")
-        self.page_id = page_id or os.environ.get("NOTION_PAGE_ID", "")
+        self.page_id = page_id or os.environ.get("NOTION_PAGE_ID", "32a2861350dc802d9ed6f1da7f46c331")
         self.ids_cache = ids_cache or os.path.join(
             os.path.dirname(os.path.dirname(__file__)), "data", "notion_ids.json"
         )
-        self.client = Client(auth=self.token) if self.token else None
+        self.headers = {
+            "Authorization": f"Bearer {self.token}",
+            "Content-Type": "application/json",
+            "Notion-Version": NOTION_VERSION,
+        }
         self._db_ids = self._load_ids()
 
     def _load_ids(self) -> dict:
-        """Load cached database IDs from disk."""
         if os.path.exists(self.ids_cache):
             with open(self.ids_cache) as f:
                 return json.load(f)
         return {}
 
     def _save_ids(self):
-        """Persist database IDs to disk."""
         os.makedirs(os.path.dirname(self.ids_cache), exist_ok=True)
         with open(self.ids_cache, "w") as f:
             json.dump(self._db_ids, f, indent=2)
 
+    def _api(self, method: str, path: str, body: dict = None) -> dict:
+        """Make a Notion API call. Raises on failure."""
+        url = f"{API_BASE}{path}"
+        resp = requests.request(method, url, headers=self.headers, json=body, timeout=15)
+        resp.raise_for_status()
+        return resp.json()
+
     def push(self, report: DailyReport, dry_run: bool = False) -> bool:
-        """Push report data to Notion. Returns True on success."""
         if not self.token or not self.page_id:
             logger.info("Notion not configured (no token or page_id). Skipping.")
             return False
@@ -75,46 +78,40 @@ class NotionReporter:
             return False
 
     def _ensure_databases(self):
-        """Create the two databases if they don't exist yet."""
         if "status_db" in self._db_ids and "history_db" in self._db_ids:
             return
 
         if "status_db" not in self._db_ids:
-            db = self.client.databases.create(
-                parent={"page_id": self.page_id},
-                title=[{"type": "text", "text": {"content": "Project Status"}}],
-                properties=self._status_schema(),
-            )
+            db = self._api("POST", "/databases", {
+                "parent": {"page_id": self.page_id},
+                "title": [{"type": "text", "text": {"content": "Project Status"}}],
+                "properties": self._status_schema(),
+            })
             self._db_ids["status_db"] = db["id"]
             logger.info(f"Created Project Status database: {db['id']}")
 
         if "history_db" not in self._db_ids:
-            db = self.client.databases.create(
-                parent={"page_id": self.page_id},
-                title=[{"type": "text", "text": {"content": "Daily History"}}],
-                properties=self._history_schema(),
-            )
+            db = self._api("POST", "/databases", {
+                "parent": {"page_id": self.page_id},
+                "title": [{"type": "text", "text": {"content": "Daily History"}}],
+                "properties": self._history_schema(),
+            })
             self._db_ids["history_db"] = db["id"]
             logger.info(f"Created Daily History database: {db['id']}")
 
         self._save_ids()
 
     def _status_schema(self) -> dict:
-        """Schema for the Project Status database."""
         return {
             "Project": {"title": {}},
             "Priority": {"number": {}},
-            "Status": {
-                "select": {
-                    "options": [
-                        {"name": "OK", "color": "green"},
-                        {"name": "WIP", "color": "blue"},
-                        {"name": "Paused", "color": "gray"},
-                        {"name": "Blocked", "color": "red"},
-                        {"name": "Error", "color": "red"},
-                    ]
-                }
-            },
+            "Status": {"select": {"options": [
+                {"name": "OK", "color": "green"},
+                {"name": "WIP", "color": "blue"},
+                {"name": "Paused", "color": "gray"},
+                {"name": "Blocked", "color": "red"},
+                {"name": "Error", "color": "red"},
+            ]}},
             "P&L": {"number": {"format": "dollar"}},
             "Win Rate": {"number": {"format": "percent"}},
             "Trades (24h)": {"number": {}},
@@ -128,28 +125,27 @@ class NotionReporter:
         }
 
     def _history_schema(self) -> dict:
-        """Schema for the Daily History database."""
         return {
             "Project": {"title": {}},
             "Date": {"date": {}},
             "P&L": {"number": {"format": "dollar"}},
             "Win Rate": {"number": {"format": "percent"}},
             "Trades": {"number": {}},
-            "Status": {
-                "select": {
-                    "options": [
-                        {"name": "OK", "color": "green"},
-                        {"name": "WIP", "color": "blue"},
-                        {"name": "Paused", "color": "gray"},
-                        {"name": "Blocked", "color": "red"},
-                        {"name": "Error", "color": "red"},
-                    ]
-                }
-            },
+            "Status": {"select": {"options": [
+                {"name": "OK", "color": "green"},
+                {"name": "WIP", "color": "blue"},
+                {"name": "Paused", "color": "gray"},
+                {"name": "Blocked", "color": "red"},
+                {"name": "Error", "color": "red"},
+            ]}},
         }
 
+    def _query_db(self, db_id: str, filter_body: dict) -> list:
+        """Query a Notion database with a filter."""
+        result = self._api("POST", f"/databases/{db_id}/query", {"filter": filter_body})
+        return result.get("results", [])
+
     def _push_status(self, report: DailyReport):
-        """Upsert one row per project in the Project Status database."""
         db_id = self._db_ids["status_db"]
         alert_map = {}
         for a in report.alerts:
@@ -159,23 +155,22 @@ class NotionReporter:
             status = self._resolve_status(m, report.alerts)
             props = self._build_status_properties(i, m, status, alert_map)
 
-            # Try to find existing row by project name
-            existing = self.client.databases.query(
-                database_id=db_id,
-                filter={"property": "Project", "title": {"equals": m.project_name}},
-            )
+            # Upsert: find existing row by project name
+            existing = self._query_db(db_id, {
+                "property": "Project",
+                "title": {"equals": m.project_name},
+            })
 
-            if existing["results"]:
-                page_id = existing["results"][0]["id"]
-                self.client.pages.update(page_id=page_id, properties=props)
+            if existing:
+                page_id = existing[0]["id"]
+                self._api("PATCH", f"/pages/{page_id}", {"properties": props})
             else:
-                self.client.pages.create(
-                    parent={"database_id": db_id},
-                    properties=props,
-                )
+                self._api("POST", "/pages", {
+                    "parent": {"database_id": db_id},
+                    "properties": props,
+                })
 
     def _push_history(self, report: DailyReport):
-        """Append one row per project to the Daily History database."""
         db_id = self._db_ids["history_db"]
         today = datetime.now(timezone.utc).date().isoformat()
 
@@ -189,19 +184,17 @@ class NotionReporter:
                 "Trades": {"number": m.trades},
                 "Status": {"select": {"name": status}},
             }
-            self.client.pages.create(
-                parent={"database_id": db_id},
-                properties=props,
-            )
+            self._api("POST", "/pages", {
+                "parent": {"database_id": db_id},
+                "properties": props,
+            })
 
     def _build_status_properties(
         self, rank: int, m: ProjectMetrics, status: str, alert_map: dict
     ) -> dict:
-        """Build Notion properties dict for a Project Status row."""
         blockers = alert_map.get(m.project_name, [])
         blocker_text = " | ".join(blockers) if blockers else ""
 
-        # Format sub-strategies
         sub_lines = []
         for sub in m.sub_strategies:
             name = sub["name"]
@@ -212,7 +205,6 @@ class NotionReporter:
             sub_lines.append(f"{name}: NAV ${nav:,.0f} | ${pnl:+,.0f} | WR {wr_str}")
         sub_text = "\n".join(sub_lines)
 
-        # Last commit (for git projects)
         commit_text = ""
         if m.last_commit_message:
             commit_text = m.last_commit_message[:100]
@@ -238,7 +230,6 @@ class NotionReporter:
         return props
 
     def _resolve_status(self, m: ProjectMetrics, alerts: list[Alert]) -> str:
-        """Determine the Notion status label for a project."""
         if m.error:
             return "Error"
 
