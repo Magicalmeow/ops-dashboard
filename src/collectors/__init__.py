@@ -4,6 +4,7 @@ from src.collectors.market_maker import MarketMakerCollector
 from src.collectors.decoded import DecodedCollector
 from src.collectors.momentum import MomentumCollector
 from src.collectors.git_collector import GitCollector
+from src.collectors.crypto_prediction import CryptoPredictionCollector
 
 
 COLLECTOR_MAP = {
@@ -11,6 +12,7 @@ COLLECTOR_MAP = {
     "trading_mm": MarketMakerCollector,
     "trading_decoded": DecodedCollector,
     "trading_momentum": MomentumCollector,
+    "trading_crypto": CryptoPredictionCollector,
     "git": GitCollector,
 }
 

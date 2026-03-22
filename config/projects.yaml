@@ -1,5 +1,5 @@
 # Ops Dashboard Project Configuration
-# Priority order: lower number = higher priority
+# Sections: WEATHER (performance), CRYPTO (performance), PROJECTS (git status)
 
 telegram:
   bot_token: ""  # Set via environment: OPS_DASHBOARD_BOT_TOKEN
@@ -14,6 +14,7 @@ blocker_thresholds:
   no_commits_days: 5
 
 projects:
+  # --- Section 1: Weather Performance ---
   - name: "Weather Bot"
     priority: 1
     collector_type: "trading_weather"
@@ -24,38 +25,27 @@ projects:
       portfolio_state_dir: "data_cache/weather_paper"
     fallback_base: "/opt/wx-bot"
 
-  - name: "Market Maker"
+  # --- Section 2: Crypto Performance ---
+  - name: "Crypto Prediction"
     priority: 2
-    collector_type: "trading_mm"
-    base_path: "/root/polymarket-kalshi-weather-bot"
-    paths:
-      equity_curve: "data_cache/mm_paper/equity_curve.tsv"
-      session_dir: "research/mm_research/data"
+    collector_type: "trading_crypto"
+    base_path: "/opt/crypto-prediction"
 
+  # --- Section 3: Project Status ---
   - name: "Equity Engine"
     priority: 3
     collector_type: "git"
     base_path: "/root/conviction-equity-engine"
     github_repo: "Magicalmeow/conviction-equity-engine"
 
-  - name: "Auto Research"
+  - name: "Polymarket Intel"
     priority: 4
     collector_type: "git"
-    base_path: "/root/autoresearch"
-    github_repo: "Magicalmeow/autoresearch"
+    base_path: "/root/polymarket-intel"
+    github_repo: "Magicalmeow/polymarket-intel"
 
-  - name: "Decoded Crypto"
+  - name: "Crypto 15min Bot"
     priority: 5
-    collector_type: "trading_decoded"
-    base_path: "/root/polymarket-kalshi-weather-bot"
-    paths:
-      trades_dir: "data_cache/paper_trading"
-      state_dir: "data_cache/paper_trading"
-
-  - name: "Crypto Momentum"
-    priority: 6
-    collector_type: "trading_momentum"
-    base_path: "/root/polymarket-kalshi-weather-bot"
-    paths:
-      trades: "data_cache/momentum_trading/momentum_trades.tsv"
-      state: "data_cache/momentum_trading/momentum_state.json"
+    collector_type: "git"
+    base_path: "/root/crypto-15min-bot"
+    github_repo: "Magicalmeow/crypto-15min-bot"

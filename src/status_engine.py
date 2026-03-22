@@ -1,6 +1,9 @@
 """Status engine — formats the daily scorecard.
 
-Takes all project metrics + alerts, produces a compact Telegram-friendly report.
+Takes all project metrics + alerts, produces a 3-section Telegram-friendly report:
+  1. WEATHER — per-strategy performance (NAV, P&L, ROI, DD)
+  2. CRYPTO — per-strategy performance (Balance, P&L, ROI, WR, Sortino)
+  3. PROJECTS — git repo activity (last commit, days ago)
 """
 
 from datetime import datetime
@@ -15,6 +18,8 @@ STATUS_PAUSE = "[PAUSE]"
 STATUS_BLOCKED = "[BLOCKED]"
 STATUS_ERROR = "[ERROR]"
 
+WEATHER_STARTING_BALANCE = 3000
+
 
 class StatusEngine:
 
@@ -24,7 +29,7 @@ class StatusEngine:
         alerts: list[Alert],
         priority_order: list[str],
     ) -> DailyReport:
-        """Generate the daily status report."""
+        """Generate the daily status report in 3 sections."""
         # Sort metrics by priority
         priority_map = {name: i for i, name in enumerate(priority_order)}
         sorted_metrics = sorted(
@@ -37,18 +42,48 @@ class StatusEngine:
         for alert in alerts:
             alert_map.setdefault(alert.project_name, []).append(alert)
 
-        # Format scorecard
+        # Categorize by section
+        weather = [m for m in sorted_metrics if m.collector_type == "trading_weather"]
+        crypto = [m for m in sorted_metrics if m.collector_type == "trading_crypto"]
+        projects = [m for m in sorted_metrics if m.collector_type == "git"]
+
         now = datetime.utcnow()
         lines = [f"Daily Status — {now.strftime('%b %d')}"]
-        lines.append("")
 
-        for i, m in enumerate(sorted_metrics, 1):
-            project_alerts = alert_map.get(m.project_name, [])
-            status = self._determine_status(m, project_alerts)
-            line = self._format_project_line(i, m, status)
-            lines.append(line)
+        # Section 1: Weather Performance
+        if weather:
+            lines.append("")
+            lines.append("━━ WEATHER ━━")
+            for m in weather:
+                if m.error:
+                    lines.append(f"  ERROR: {m.error[:60]}")
+                    continue
+                for sub in m.sub_strategies:
+                    lines.append(self._format_weather_sub(sub))
 
-        # Append nag alerts
+        # Section 2: Crypto Performance
+        if crypto:
+            lines.append("")
+            lines.append("━━ CRYPTO ━━")
+            for m in crypto:
+                if m.error:
+                    lines.append(f"  ERROR: {m.error[:60]}")
+                    continue
+                # Sort sub-strategies by P&L descending
+                subs = sorted(m.sub_strategies, key=lambda s: s.get("pnl", 0), reverse=True)
+                for sub in subs:
+                    lines.append(self._format_crypto_sub(sub))
+
+        # Section 3: Projects
+        if projects:
+            lines.append("")
+            lines.append("━━ PROJECTS ━━")
+            for m in projects:
+                proj_alerts = alert_map.get(m.project_name, [])
+                status = self._determine_status(m, proj_alerts)
+                lines.append(self._format_git_project(m, status))
+
+        # Nag alerts
         nag_alerts = [a for a in alerts if a.days_stuck >= 2]
         if nag_alerts:
             lines.append("")
@@ -87,36 +122,61 @@ class StatusEngine:
 
         return STATUS_PAUSE
 
-    def _format_project_line(self, rank: int, m: ProjectMetrics, status: str) -> str:
-        """Format a single project line for the scorecard."""
-        name = m.project_name.upper()
-        pad = max(1, 12 - len(name))
+    def _format_weather_sub(self, sub: dict) -> str:
+        """Format a weather sub-strategy line."""
+        name = sub["name"]
+        nav = sub.get("nav", 0)
+        pnl = sub.get("pnl", 0)
+        roi = ((nav - WEATHER_STARTING_BALANCE) / WEATHER_STARTING_BALANCE * 100) if nav else 0
+        max_dd = sub.get("max_dd", 0)
+        n_open = sub.get("open", 0)
+        n_closed = sub.get("closed", 0)
+        wr = sub.get("win_rate")
 
-        if m.collector_type == "trading_weather":
-            detail = f"{m.signals} signals | {m.trades} trades | ${m.pnl:+.0f} P&L"
-            if m.win_rate is not None:
-                detail += f" | {m.win_rate:.0%} WR"
+        wr_str = f"{wr:.0%} WR" if wr is not None else "no resolves"
 
-        elif m.collector_type == "trading_mm":
-            detail = f"{m.fills} fills | ${m.pnl:+.0f} P&L | {m.exposure_pct:.0f}% exposure"
+        return (
+            f"  {name}: NAV ${nav:,.0f} | ${pnl:+,.0f} P&L | "
+            f"{roi:+.1f}% ROI | {max_dd * 100:.1f}% DD | "
+            f"{n_open} open, {n_closed} closed | {wr_str}"
+        )
 
-        elif m.collector_type == "trading_decoded":
-            detail = f"{m.trades} trades | ${m.pnl:+.0f} P&L | {m.open_positions} open"
-            if m.win_rate is not None:
-                detail += f" | {m.win_rate:.0%} WR"
+    def _format_crypto_sub(self, sub: dict) -> str:
+        """Format a crypto sub-strategy line."""
+        name = sub["name"]
+        bal = sub.get("balance", 500)
+        pnl = sub.get("pnl", 0)
+        roi = sub.get("roi", 0)
+        wr = sub.get("win_rate", 0)
+        sortino = sub.get("sortino", 0)
+        settled = sub.get("settled", 0)
+        n_open = sub.get("open", 0)
+        runtime_h = sub.get("runtime_hours", 0)
 
-        elif m.collector_type == "trading_momentum":
-            detail = f"{m.trades} trades | ${m.pnl:+.0f} P&L | {m.open_positions} pos"
-            if m.win_rate is not None:
-                detail += f" | {m.win_rate:.0%} WR"
-
-        elif m.collector_type == "git":
-            detail = m.status_text or "No data"
-
+        # Format runtime: "<1h", "5h", "2d", etc.
+        if runtime_h < 1:
+            runtime_str = "<1h"
+        elif runtime_h < 48:
+            runtime_str = f"{runtime_h:.0f}h"
         else:
-            detail = m.status_text or "Unknown"
+            runtime_str = f"{runtime_h / 24:.0f}d"
 
-        if m.error:
-            detail = f"ERROR: {m.error[:50]}"
+        return (
+            f"  {name}: ${bal:,.0f} | ${pnl:+,.0f} | "
+            f"{roi:+.1f}% | {wr:.0f}% WR | "
+            f"{sortino:.1f} Sort | {settled}/{n_open} | {runtime_str}"
+        )
 
-        return f"{rank}. {name}{' ' * pad}{status} {detail}"
+    def _format_git_project(self, m: ProjectMetrics, status: str) -> str:
+        """Format a git project line."""
+        name = m.project_name
+        if m.last_commit_date:
+            days_ago = (datetime.utcnow() - m.last_commit_date.replace(tzinfo=None)).days
+            msg = m.last_commit_message or ""
+            if len(msg) > 40:
+                msg = msg[:37] + "..."
+            return f"  {name} {status} {days_ago}d ago — {msg}"
+        elif m.error:
+            return f"  {name} {status} {m.error[:50]}"
+        else:
+            return f"  {name} {status} {m.status_text or 'No data'}"

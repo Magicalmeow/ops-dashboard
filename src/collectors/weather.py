@@ -44,11 +44,12 @@ class WeatherCollector(BaseCollector):
             if trades_path:
                 metrics.trades = self._count_trades(trades_path)
 
-            # P&L + win rate from portfolio state files
-            pnl, win_rate, positions = self._read_portfolio_state(state_dir)
+            # P&L + win rate from portfolio state files (per-strategy)
+            pnl, win_rate, positions, subs = self._read_portfolio_state(state_dir)
             metrics.pnl = pnl
             metrics.win_rate = win_rate
             metrics.open_positions = positions
+            metrics.sub_strategies = subs
 
         except Exception as e:
             metrics.healthy = False
@@ -108,35 +109,64 @@ class WeatherCollector(BaseCollector):
         return count
 
     def _read_portfolio_state(self, state_dir: str) -> tuple:
-        """Read all *_state.json files, aggregate P&L and win rate."""
+        """Read all *_state.json files, return aggregates + per-strategy breakdown."""
         total_pnl = 0.0
         total_wins = 0
         total_resolved = 0
         total_open = 0
+        sub_strategies = []
 
         if not os.path.isdir(state_dir):
-            return 0.0, None, 0
+            return 0.0, None, 0, []
 
-        for path in glob.glob(os.path.join(state_dir, "*_state.json")):
+        # Only show active ColdMath A/B strategies
+        ACTIVE_STRATEGIES = {"coldmath_base", "coldmath_forecast"}
+        for path in sorted(glob.glob(os.path.join(state_dir, "*_state.json"))):
             try:
                 with open(path) as f:
                     state = json.load(f)
+
+                name = state.get("strategy", os.path.basename(path).replace("_state.json", ""))
+                if name not in ACTIVE_STRATEGIES:
+                    continue
                 portfolio = state.get("portfolio", {})
                 balance = portfolio.get("balance", 0)
                 starting = portfolio.get("starting_balance", 0)
-                if starting:
-                    total_pnl += balance - starting
+                pnl = state.get("total_pnl_mtm", balance - starting if starting else 0)
+                nav = state.get("nav", balance)
+                max_dd = state.get("max_drawdown", 0)
+                sharpe = state.get("sharpe", 0)
+                unrealized = state.get("unrealized_pnl", 0)
 
-                open_trades = state.get("open_trades", [])
-                total_open += len(open_trades)
+                # Open positions — dict keyed by position ID
+                open_pos = state.get("open_positions", {})
+                n_open = len(open_pos)
+                total_open += n_open
 
-                # Win rate from resolved trades
-                for trade in state.get("resolved_trades", []):
-                    total_resolved += 1
-                    if trade.get("resolution") == "WIN":
-                        total_wins += 1
+                # Closed positions — list of dicts
+                closed = state.get("closed_positions", [])
+                n_closed = len(closed)
+                wins = sum(1 for c in closed if c.get("won"))
+                wr = wins / n_closed if n_closed else None
+
+                total_pnl += pnl
+                total_resolved += n_closed
+                total_wins += wins
+
+                sub_strategies.append({
+                    "name": name,
+                    "nav": nav,
+                    "pnl": pnl,
+                    "unrealized": unrealized,
+                    "open": n_open,
+                    "closed": n_closed,
+                    "win_rate": wr,
+                    "max_dd": max_dd,
+                    "sharpe": sharpe,
+                })
+
             except (json.JSONDecodeError, KeyError):
                 continue
 
         win_rate = (total_wins / total_resolved) if total_resolved > 0 else None
-        return total_pnl, win_rate, total_open
+        return total_pnl, win_rate, total_open, sub_strategies

@@ -99,8 +99,13 @@ class GitCollector(BaseCollector):
 
     def _read_from_github_curl(self, repo: str, metrics: ProjectMetrics):
         """Fallback: use curl + GitHub API to get latest commit (no gh CLI needed)."""
+        cmd = ["curl", "-sf"]
+        token = os.environ.get("GITHUB_TOKEN", "")
+        if token:
+            cmd.extend(["-H", f"Authorization: token {token}"])
+        cmd.append(f"https://api.github.com/repos/{repo}/commits?per_page=1")
         result = subprocess.run(
-            ["curl", "-sf", f"https://api.github.com/repos/{repo}/commits?per_page=1"],
+            cmd,
             capture_output=True, text=True, timeout=15,
         )
         if result.returncode == 0 and result.stdout.strip():

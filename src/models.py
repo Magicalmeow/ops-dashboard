@@ -33,6 +33,9 @@ class ProjectMetrics:
     # Status text (for non-metric summaries)
     status_text: Optional[str] = None
 
+    # Sub-strategy breakdown (for A/B weather strategies)
+    sub_strategies: list = field(default_factory=list)  # list of dicts
+
     def to_dict(self) -> dict:
         """Serialize for JSONL history."""
         d = {
