@@ -44,7 +44,7 @@ class StatusEngine:
 
         # Categorize by section
         weather = [m for m in sorted_metrics if m.collector_type == "trading_weather"]
-        crypto = [m for m in sorted_metrics if m.collector_type == "trading_crypto"]
+        crypto = [m for m in sorted_metrics if m.collector_type in ("trading_crypto", "trading_mm", "trading_decoded", "trading_momentum")]
         projects = [m for m in sorted_metrics if m.collector_type == "git"]
 
         now = datetime.utcnow()
@@ -55,8 +55,9 @@ class StatusEngine:
             lines.append("")
             lines.append("━━ WEATHER ━━")
             for m in weather:
+                lines.append(f"  {m.project_name.upper()}: {m.signals} signals, {m.trades} trades")
                 if m.error:
-                    lines.append(f"  ERROR: {m.error[:60]}")
+                    lines.append(f"    ERROR: {m.error[:60]}")
                     continue
                 for sub in m.sub_strategies:
                     lines.append(self._format_weather_sub(sub))
@@ -66,8 +67,9 @@ class StatusEngine:
             lines.append("")
             lines.append("━━ CRYPTO ━━")
             for m in crypto:
+                lines.append(f"  {m.project_name.upper()}: {m.fills} fills")
                 if m.error:
-                    lines.append(f"  ERROR: {m.error[:60]}")
+                    lines.append(f"    ERROR: {m.error[:60]}")
                     continue
                 # Sort sub-strategies by P&L descending
                 subs = sorted(m.sub_strategies, key=lambda s: s.get("pnl", 0), reverse=True)
@@ -78,10 +80,10 @@ class StatusEngine:
         if projects:
             lines.append("")
             lines.append("━━ PROJECTS ━━")
-            for m in projects:
+            for idx, m in enumerate(projects, start=1):
                 proj_alerts = alert_map.get(m.project_name, [])
                 status = self._determine_status(m, proj_alerts)
-                lines.append(self._format_git_project(m, status))
+                lines.append(self._format_git_project(m, status, idx))
 
         # Nag alerts
         nag_alerts = [a for a in alerts if a.days_stuck >= 2]
@@ -167,16 +169,17 @@ class StatusEngine:
             f"{sortino:.1f} Sort | {settled}/{n_open} | {runtime_str}"
         )
 
-    def _format_git_project(self, m: ProjectMetrics, status: str) -> str:
+    def _format_git_project(self, m: ProjectMetrics, status: str, idx: int = 0) -> str:
         """Format a git project line."""
         name = m.project_name
+        prefix = f"{idx}. " if idx else "  "
         if m.last_commit_date:
             days_ago = (datetime.utcnow() - m.last_commit_date.replace(tzinfo=None)).days
             msg = m.last_commit_message or ""
             if len(msg) > 40:
                 msg = msg[:37] + "..."
-            return f"  {name} {status} {days_ago}d ago — {msg}"
+            return f"{prefix}{name} {status} {days_ago}d ago — {msg}"
         elif m.error:
-            return f"  {name} {status} {m.error[:50]}"
+            return f"{prefix}{name} {status} {m.error[:50]}"
         else:
-            return f"  {name} {status} {m.status_text or 'No data'}"
+            return f"{prefix}{name} {status} {m.status_text or 'No data'}"
