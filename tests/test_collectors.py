@@ -222,3 +222,72 @@ class TestMomentumCollector:
         assert m.trades == 0
         assert m.pnl == 0.0
         assert m.healthy
+
+
+# ── Git Collector ──────────────────────────────────────────────────
+
+class TestGitCollector:
+    """Tests for git-based project collector (issue #5)."""
+
+    def _make_config(self, base_path, github_repo=None):
+        cfg = {
+            "name": "Test Repo",
+            "collector_type": "git",
+            "base_path": base_path,
+        }
+        if github_repo:
+            cfg["github_repo"] = github_repo
+        return cfg
+
+    def test_missing_repo_without_github_fallback(self):
+        """Repo not found and no github_repo configured → error."""
+        from src.collectors.git_collector import GitCollector
+        config = self._make_config("/nonexistent/repo")
+        c = GitCollector(config)
+        m = c.collect()
+        assert not m.healthy
+        assert m.error is not None
+
+    def test_missing_repo_with_github_fallback_sets_status(self):
+        """Repo not found but github_repo configured → status text (may fail gracefully)."""
+        from src.collectors.git_collector import GitCollector
+        config = self._make_config("/nonexistent/repo", github_repo="owner/repo")
+        c = GitCollector(config)
+        m = c.collect()
+        # Should not raise; status_text is set (even if API unreachable)
+        assert m.status_text is not None
+
+    def test_reads_git_log_from_local_repo(self):
+        """GitCollector reads last commit from a real local git repo."""
+        from src.collectors.git_collector import GitCollector
+        # Use this repo itself as a fixture
+        repo_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        config = self._make_config(repo_path)
+        c = GitCollector(config)
+        m = c.collect()
+        assert m.healthy
+        assert m.last_commit_date is not None
+        assert m.last_commit_message is not None
+        assert "Last commit" in m.status_text
+
+    def test_reads_handoff_summary(self):
+        """GitCollector extracts title from latest handoff markdown file."""
+        from src.collectors.git_collector import GitCollector
+        with tempfile.TemporaryDirectory() as tmpdir:
+            import subprocess
+            subprocess.run(["git", "-C", tmpdir, "init"], capture_output=True)
+            subprocess.run(
+                ["git", "-C", tmpdir, "commit", "--allow-empty", "-m", "init"],
+                capture_output=True,
+                env={**os.environ, "GIT_AUTHOR_NAME": "Test", "GIT_AUTHOR_EMAIL": "t@t.com",
+                     "GIT_COMMITTER_NAME": "Test", "GIT_COMMITTER_EMAIL": "t@t.com"},
+            )
+            handoff_dir = os.path.join(tmpdir, "handoffs")
+            os.makedirs(handoff_dir)
+            with open(os.path.join(handoff_dir, "2026-03-20_handoff.md"), "w") as f:
+                f.write("# CDP browser scraper 90% done\n\nSome body text.\n")
+
+            config = self._make_config(tmpdir)
+            c = GitCollector(config)
+            m = c.collect()
+            assert m.handoff_summary == "CDP browser scraper 90% done"
