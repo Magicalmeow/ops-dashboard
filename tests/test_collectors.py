@@ -83,6 +83,39 @@ class TestWeatherCollector:
             assert m.open_positions == 2
             assert m.win_rate == pytest.approx(2 / 3)
 
+    def test_dead_strategies_filtered_out(self):
+        """Dead ColdMath strategies must not appear in portfolio state.
+
+        Strategy names 'coldmath_base' and 'coldmath_forecast' were retired.
+        The active set is metar_pure_latency, synoptic_latency, ensemble.
+        A state file for a dead strategy should contribute zero P&L.
+        """
+        from src.collectors.weather import WeatherCollector
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_dir = os.path.join(tmpdir, "weather_paper")
+            os.makedirs(state_dir)
+
+            dead_state = {
+                "strategy": "coldmath_base",
+                "portfolio": {"starting_balance": 1000, "balance": 2000},
+                "open_trades": [{"id": "x1"}],
+                "resolved_trades": [{"resolution": "WIN"}],
+            }
+            with open(os.path.join(state_dir, "coldmath_base_state.json"), "w") as f:
+                json.dump(dead_state, f)
+
+            import shutil
+            shutil.copy(os.path.join(FIXTURES, "signal_log.tsv"), tmpdir)
+            shutil.copy(os.path.join(FIXTURES, "paper_trades.tsv"), tmpdir)
+
+            config = self._make_config(tmpdir)
+            c = WeatherCollector(config)
+            m = c.collect()
+            # Dead strategy must not inflate P&L or position counts
+            assert m.pnl == 0.0
+            assert m.open_positions == 0
+            assert m.sub_strategies == []
+
 
 # ── Market Maker Collector ─────────────────────────────────────────
 
@@ -222,3 +255,250 @@ class TestMomentumCollector:
         assert m.trades == 0
         assert m.pnl == 0.0
         assert m.healthy
+
+
+# ── Git Collector ──────────────────────────────────────────────────
+
+class TestGitCollector:
+    """Tests for git-based project collector (issue #5)."""
+
+    def _make_config(self, base_path, github_repo=None):
+        cfg = {
+            "name": "Test Repo",
+            "collector_type": "git",
+            "base_path": base_path,
+        }
+        if github_repo:
+            cfg["github_repo"] = github_repo
+        return cfg
+
+    def test_missing_repo_without_github_fallback(self):
+        """Repo not found and no github_repo configured → error."""
+        from src.collectors.git_collector import GitCollector
+        config = self._make_config("/nonexistent/repo")
+        c = GitCollector(config)
+        m = c.collect()
+        assert not m.healthy
+        assert m.error is not None
+
+    def test_missing_repo_with_github_fallback_sets_status(self):
+        """Repo not found but github_repo configured → status text (may fail gracefully)."""
+        from src.collectors.git_collector import GitCollector
+        config = self._make_config("/nonexistent/repo", github_repo="owner/repo")
+        c = GitCollector(config)
+        m = c.collect()
+        # Should not raise; status_text is set (even if API unreachable)
+        assert m.status_text is not None
+
+    def test_reads_git_log_from_local_repo(self):
+        """GitCollector reads last commit from a real local git repo."""
+        from src.collectors.git_collector import GitCollector
+        # Use this repo itself as a fixture
+        repo_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        config = self._make_config(repo_path)
+        c = GitCollector(config)
+        m = c.collect()
+        assert m.healthy
+        assert m.last_commit_date is not None
+        assert m.last_commit_message is not None
+        assert "Last commit" in m.status_text
+
+    def test_reads_handoff_summary(self):
+        """GitCollector extracts title from latest handoff markdown file."""
+        from src.collectors.git_collector import GitCollector
+        with tempfile.TemporaryDirectory() as tmpdir:
+            import subprocess
+            subprocess.run(["git", "-C", tmpdir, "init"], capture_output=True)
+            subprocess.run(
+                ["git", "-C", tmpdir, "commit", "--allow-empty", "-m", "init"],
+                capture_output=True,
+                env={**os.environ, "GIT_AUTHOR_NAME": "Test", "GIT_AUTHOR_EMAIL": "t@t.com",
+                     "GIT_COMMITTER_NAME": "Test", "GIT_COMMITTER_EMAIL": "t@t.com"},
+            )
+            handoff_dir = os.path.join(tmpdir, "handoffs")
+            os.makedirs(handoff_dir)
+            with open(os.path.join(handoff_dir, "2026-03-20_handoff.md"), "w") as f:
+                f.write("# CDP browser scraper 90% done\n\nSome body text.\n")
+
+            config = self._make_config(tmpdir)
+            c = GitCollector(config)
+            m = c.collect()
+            assert m.handoff_summary == "CDP browser scraper 90% done"
+
+
+# ── Telegram Reporter ──────────────────────────────────────────────
+
+class TestTelegramReporter:
+
+    def test_send_skips_when_no_credentials(self):
+        """Reporter returns False and doesn't raise when no bot_token/chat_id."""
+        import os
+        from datetime import datetime
+        from src.telegram_reporter import TelegramReporter
+        from src.models import DailyReport
+
+        # Ensure env vars are not set
+        env_backup = {
+            "OPS_DASHBOARD_BOT_TOKEN": os.environ.pop("OPS_DASHBOARD_BOT_TOKEN", None),
+            "OPS_DASHBOARD_CHAT_ID": os.environ.pop("OPS_DASHBOARD_CHAT_ID", None),
+        }
+        try:
+            reporter = TelegramReporter(bot_token="", chat_id="")
+            report = DailyReport(
+                generated_at=datetime.utcnow(),
+                scorecard="Test scorecard",
+                project_metrics=[],
+                alerts=[],
+            )
+            result = reporter.send(report)
+            assert result is False
+        finally:
+            for k, v in env_backup.items():
+                if v is not None:
+                    os.environ[k] = v
+
+    def test_send_calls_telegram_api(self, monkeypatch):
+        """Reporter calls Telegram sendMessage endpoint with scorecard text."""
+        from datetime import datetime
+        import requests as req_module
+        from src.telegram_reporter import TelegramReporter
+        from src.models import DailyReport
+
+        calls = []
+
+        class MockResponse:
+            status_code = 200
+            def json(self):
+                return {"ok": True}
+
+        def mock_post(url, json=None, timeout=None):
+            calls.append({"url": url, "json": json})
+            return MockResponse()
+
+        monkeypatch.setattr(req_module, "post", mock_post)
+
+        reporter = TelegramReporter(bot_token="test_token", chat_id="12345")
+        report = DailyReport(
+            generated_at=datetime.utcnow(),
+            scorecard="Daily scorecard content",
+            project_metrics=[],
+            alerts=[],
+        )
+        result = reporter.send(report)
+
+        assert result is True
+        assert len(calls) == 1
+        assert "test_token" in calls[0]["url"]
+        assert "Daily scorecard content" in calls[0]["json"]["text"]
+        assert calls[0]["json"]["chat_id"] == "12345"
+
+    def test_send_falls_back_to_plain_text_on_parse_error(self, monkeypatch):
+        """Reporter falls back to plain text if Markdown fails (400 error)."""
+        from datetime import datetime
+        import requests as req_module
+        from src.telegram_reporter import TelegramReporter
+        from src.models import DailyReport
+
+        call_count = [0]
+
+        class MockResponse:
+            def __init__(self, status_code):
+                self.status_code = status_code
+                self.text = "Bad Request: can't parse entities"
+
+        def mock_post(url, json=None, timeout=None):
+            call_count[0] += 1
+            # First call (Markdown) fails; second (plain) succeeds
+            if call_count[0] == 1:
+                return MockResponse(400)
+            return MockResponse(200)
+
+        monkeypatch.setattr(req_module, "post", mock_post)
+
+        reporter = TelegramReporter(bot_token="tok", chat_id="99")
+        report = DailyReport(
+            generated_at=datetime.utcnow(),
+            scorecard="Plain fallback test",
+            project_metrics=[],
+            alerts=[],
+        )
+        result = reporter.send(report)
+
+        assert result is True
+        assert call_count[0] == 2  # Two attempts: Markdown then plain
+
+
+# ── End-to-End Pipeline ────────────────────────────────────────────
+
+class TestWeatherPipeline:
+    """End-to-end: WeatherCollector → StatusEngine → TelegramReporter (mocked)."""
+
+    def test_full_pipeline(self, monkeypatch, tmp_path):
+        """Full pipeline produces a scorecard and sends it via Telegram."""
+        import json
+        import shutil
+        import requests as req_module
+        from src.collectors.weather import WeatherCollector
+        from src.status_engine import StatusEngine
+        from src.telegram_reporter import TelegramReporter
+        from src.models import DailyReport
+
+        # Set up fixture files
+        state_dir = tmp_path / "weather_paper"
+        state_dir.mkdir()
+        state = {
+            "strategy": "metar_pure_latency",
+            "portfolio": {"starting_balance": 1000, "balance": 1100},
+            "open_trades": [],
+            "resolved_trades": [
+                {"resolution": "WIN"},
+                {"resolution": "WIN"},
+                {"resolution": "LOSS"},
+            ],
+        }
+        (state_dir / "metar_pure_latency_state.json").write_text(json.dumps(state))
+        shutil.copy(os.path.join(FIXTURES, "signal_log.tsv"), tmp_path)
+        shutil.copy(os.path.join(FIXTURES, "paper_trades.tsv"), tmp_path)
+
+        # Collect metrics
+        config = {
+            "name": "Weather Bot",
+            "collector_type": "trading_weather",
+            "base_path": str(tmp_path),
+            "paths": {
+                "signal_log": "signal_log.tsv",
+                "paper_trades": "paper_trades.tsv",
+                "portfolio_state_dir": "weather_paper",
+            },
+        }
+        collector = WeatherCollector(config)
+        metrics = collector.collect()
+
+        assert metrics.healthy
+        assert metrics.pnl == pytest.approx(100.0)
+        assert metrics.win_rate == pytest.approx(2 / 3)
+
+        # Generate scorecard
+        engine = StatusEngine()
+        report = engine.generate_report([metrics], [], ["Weather Bot"])
+        assert "WEATHER" in report.scorecard
+        assert len(report.scorecard) > 20
+
+        # Send via TelegramReporter (mocked)
+        sent_payloads = []
+
+        class MockResponse:
+            status_code = 200
+
+        def mock_post(url, json=None, timeout=None):
+            sent_payloads.append(json)
+            return MockResponse()
+
+        monkeypatch.setattr(req_module, "post", mock_post)
+
+        reporter = TelegramReporter(bot_token="pipeline_token", chat_id="777")
+        result = reporter.send(report)
+
+        assert result is True
+        assert len(sent_payloads) == 1
+        assert report.scorecard in sent_payloads[0]["text"]

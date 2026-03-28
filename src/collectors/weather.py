@@ -119,8 +119,8 @@ class WeatherCollector(BaseCollector):
         if not os.path.isdir(state_dir):
             return 0.0, None, 0, []
 
-        # Only show active ColdMath A/B strategies
-        ACTIVE_STRATEGIES = {"coldmath_base", "coldmath_forecast"}
+        # Active strategies to report (updated from ColdMath to current latency strategies)
+        ACTIVE_STRATEGIES = {"metar_pure_latency", "synoptic_latency", "ensemble"}
         for path in sorted(glob.glob(os.path.join(state_dir, "*_state.json"))):
             try:
                 with open(path) as f:
@@ -138,15 +138,18 @@ class WeatherCollector(BaseCollector):
                 sharpe = state.get("sharpe", 0)
                 unrealized = state.get("unrealized_pnl", 0)
 
-                # Open positions — dict keyed by position ID
-                open_pos = state.get("open_positions", {})
-                n_open = len(open_pos)
+                # Open positions — dict keyed by position ID, or list of trade dicts
+                open_pos_raw = state.get("open_positions", state.get("open_trades", {}))
+                n_open = len(open_pos_raw)
                 total_open += n_open
 
-                # Closed positions — list of dicts
-                closed = state.get("closed_positions", [])
+                # Closed positions — list of dicts (supports "won" bool or "resolution" string)
+                closed = state.get("closed_positions", state.get("resolved_trades", []))
                 n_closed = len(closed)
-                wins = sum(1 for c in closed if c.get("won"))
+                wins = sum(
+                    1 for c in closed
+                    if c.get("won") or c.get("resolution") == "WIN"
+                )
                 wr = wins / n_closed if n_closed else None
 
                 total_pnl += pnl
