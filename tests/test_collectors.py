@@ -83,6 +83,39 @@ class TestWeatherCollector:
             assert m.open_positions == 2
             assert m.win_rate == pytest.approx(2 / 3)
 
+    def test_dead_strategies_filtered_out(self):
+        """Dead ColdMath strategies must not appear in portfolio state.
+
+        Strategy names 'coldmath_base' and 'coldmath_forecast' were retired.
+        The active set is metar_pure_latency, synoptic_latency, ensemble.
+        A state file for a dead strategy should contribute zero P&L.
+        """
+        from src.collectors.weather import WeatherCollector
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_dir = os.path.join(tmpdir, "weather_paper")
+            os.makedirs(state_dir)
+
+            dead_state = {
+                "strategy": "coldmath_base",
+                "portfolio": {"starting_balance": 1000, "balance": 2000},
+                "open_trades": [{"id": "x1"}],
+                "resolved_trades": [{"resolution": "WIN"}],
+            }
+            with open(os.path.join(state_dir, "coldmath_base_state.json"), "w") as f:
+                json.dump(dead_state, f)
+
+            import shutil
+            shutil.copy(os.path.join(FIXTURES, "signal_log.tsv"), tmpdir)
+            shutil.copy(os.path.join(FIXTURES, "paper_trades.tsv"), tmpdir)
+
+            config = self._make_config(tmpdir)
+            c = WeatherCollector(config)
+            m = c.collect()
+            # Dead strategy must not inflate P&L or position counts
+            assert m.pnl == 0.0
+            assert m.open_positions == 0
+            assert m.sub_strategies == []
+
 
 # ── Market Maker Collector ─────────────────────────────────────────
 
