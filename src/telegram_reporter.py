@@ -16,6 +16,7 @@ from src.kill_handler import (
     handle_kill,
     handle_kill_status,
     handle_resume,
+    is_authorized,
 )
 from src.models import DailyReport
 
@@ -59,10 +60,10 @@ class TelegramReporter:
             if resp.status_code == 200:
                 return True
 
-            logger.error(f"Telegram send failed: {resp.status_code} {resp.text[:200]}")
+            logger.error("Telegram send failed: %s %s", resp.status_code, resp.text[:200])
             return False
         except requests.RequestException as e:
-            logger.error(f"Telegram request failed: {e}")
+            logger.error("Telegram request failed: %s", e)
             return False
 
     def run_bot(self, report_fn):
@@ -87,7 +88,7 @@ class TelegramReporter:
                 }, timeout=35)
 
                 if resp.status_code != 200:
-                    logger.warning(f"getUpdates failed: {resp.status_code}")
+                    logger.warning("getUpdates failed: %s", resp.status_code)
                     continue
 
                 data = resp.json()
@@ -98,15 +99,21 @@ class TelegramReporter:
                     chat_id = str(msg.get("chat", {}).get("id", ""))
 
                     if text.startswith("/kill"):
-                        logger.info(f"/kill from chat {chat_id}: {text}")
+                        if not is_authorized(chat_id):
+                            self._send_message(chat_id, "Unauthorized.")
+                            continue
+                        logger.info("/kill from chat %s: %s", chat_id, text)
                         self._send_message(chat_id, handle_kill(chat_id, text))
 
                     elif text.startswith("/resume"):
-                        logger.info(f"/resume from chat {chat_id}: {text}")
+                        if not is_authorized(chat_id):
+                            self._send_message(chat_id, "Unauthorized.")
+                            continue
+                        logger.info("/resume from chat %s: %s", chat_id, text)
                         self._send_message(chat_id, handle_resume(chat_id, text))
 
                     elif text.startswith("/status"):
-                        logger.info(f"/status from chat {chat_id}")
+                        logger.info("/status from chat %s", chat_id)
                         try:
                             report = report_fn()
                             kill_status = handle_kill_status()
@@ -118,7 +125,7 @@ class TelegramReporter:
                             self._send_message(chat_id, f"Error: {e}")
 
                     elif text.startswith("/update") or text.startswith("/start"):
-                        logger.info(f"/update from chat {chat_id}")
+                        logger.info("/update from chat %s", chat_id)
                         try:
                             report = report_fn()
                             self._send_message(chat_id, report.scorecard)
@@ -144,6 +151,6 @@ class TelegramReporter:
             except requests.exceptions.ReadTimeout:
                 continue  # normal for long-polling
             except Exception as e:
-                logger.error(f"Bot loop error: {e}")
+                logger.error("Bot loop error: %s", e)
                 import time
                 time.sleep(5)

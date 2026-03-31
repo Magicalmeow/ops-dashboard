@@ -6,15 +6,25 @@ or resume-trading.sh. Manages confirmation state for /kill and /resume commands.
 
 import json
 import logging
+import os
 import subprocess
 from dataclasses import dataclass
 from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-DUBLIN_HOST = "ubuntu@99.81.160.132"
-SSH_OPTS = ["-o", "ConnectTimeout=10", "-o", "StrictHostKeyChecking=no"]
+DUBLIN_HOST = os.environ.get("DUBLIN_SSH_HOST", "ubuntu@99.81.160.132")
+SSH_OPTS = ["-o", "ConnectTimeout=10", "-o", "StrictHostKeyChecking=accept-new"]
 VALID_TARGETS = {"crypto", "weather", "all"}
+
+ALLOWED_CHAT_IDS: set[str] = set(
+    filter(None, os.environ.get("OPS_DASHBOARD_CHAT_ID", "").split(","))
+)
+
+
+def is_authorized(chat_id: str) -> bool:
+    """Check if chat_id is in the allowlist for destructive commands."""
+    return chat_id in ALLOWED_CHAT_IDS
 
 
 @dataclass
