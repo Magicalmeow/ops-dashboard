@@ -11,6 +11,13 @@ import threading
 
 import requests
 
+from src.kill_handler import (
+    handle_confirmation,
+    handle_kill,
+    handle_kill_status,
+    handle_resume,
+    is_authorized,
+)
 from src.models import DailyReport
 
 logger = logging.getLogger(__name__)
@@ -53,10 +60,10 @@ class TelegramReporter:
             if resp.status_code == 200:
                 return True
 
-            logger.error(f"Telegram send failed: {resp.status_code} {resp.text[:200]}")
+            logger.error("Telegram send failed: %s %s", resp.status_code, resp.text[:200])
             return False
         except requests.RequestException as e:
-            logger.error(f"Telegram request failed: {e}")
+            logger.error("Telegram request failed: %s", e)
             return False
 
     def run_bot(self, report_fn):
@@ -81,7 +88,7 @@ class TelegramReporter:
                 }, timeout=35)
 
                 if resp.status_code != 200:
-                    logger.warning(f"getUpdates failed: {resp.status_code}")
+                    logger.warning("getUpdates failed: %s", resp.status_code)
                     continue
 
                 data = resp.json()
@@ -91,17 +98,59 @@ class TelegramReporter:
                     text = msg.get("text", "")
                     chat_id = str(msg.get("chat", {}).get("id", ""))
 
-                    if text.startswith("/update") or text.startswith("/start"):
-                        logger.info(f"/update from chat {chat_id}")
+                    if text.startswith("/kill"):
+                        if not is_authorized(chat_id):
+                            self._send_message(chat_id, "Unauthorized.")
+                            continue
+                        logger.info("/kill from chat %s: %s", chat_id, text)
+                        self._send_message(chat_id, handle_kill(chat_id, text))
+
+                    elif text.startswith("/resume"):
+                        if not is_authorized(chat_id):
+                            self._send_message(chat_id, "Unauthorized.")
+                            continue
+                        logger.info("/resume from chat %s: %s", chat_id, text)
+                        self._send_message(chat_id, handle_resume(chat_id, text))
+
+                    elif text.startswith("/status"):
+                        logger.info("/status from chat %s", chat_id)
+                        try:
+                            report = report_fn()
+                            kill_status = handle_kill_status()
+                            self._send_message(
+                                chat_id,
+                                f"{report.scorecard}\n\n{kill_status}",
+                            )
+                        except Exception as e:
+                            self._send_message(chat_id, f"Error: {e}")
+
+                    elif text.startswith("/update") or text.startswith("/start"):
+                        logger.info("/update from chat %s", chat_id)
                         try:
                             report = report_fn()
                             self._send_message(chat_id, report.scorecard)
                         except Exception as e:
                             self._send_message(chat_id, f"Error generating report: {e}")
 
+                    elif text.startswith("/help"):
+                        self._send_message(chat_id, (
+                            "Commands:\n"
+                            "/update — Fresh status report\n"
+                            "/status — Status + kill switch state\n"
+                            "/kill crypto|weather|all — Hard kill\n"
+                            "/resume crypto|weather|all — Resume\n"
+                            "/help — This message"
+                        ))
+
+                    else:
+                        # Check for YES/NO confirmation of pending kill/resume
+                        reply = handle_confirmation(chat_id, text)
+                        if reply:
+                            self._send_message(chat_id, reply)
+
             except requests.exceptions.ReadTimeout:
                 continue  # normal for long-polling
             except Exception as e:
-                logger.error(f"Bot loop error: {e}")
+                logger.error("Bot loop error: %s", e)
                 import time
                 time.sleep(5)
