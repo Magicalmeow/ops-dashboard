@@ -11,6 +11,12 @@ import threading
 
 import requests
 
+from src.kill_handler import (
+    handle_confirmation,
+    handle_kill,
+    handle_kill_status,
+    handle_resume,
+)
 from src.models import DailyReport
 
 logger = logging.getLogger(__name__)
@@ -91,13 +97,49 @@ class TelegramReporter:
                     text = msg.get("text", "")
                     chat_id = str(msg.get("chat", {}).get("id", ""))
 
-                    if text.startswith("/update") or text.startswith("/start"):
+                    if text.startswith("/kill"):
+                        logger.info(f"/kill from chat {chat_id}: {text}")
+                        self._send_message(chat_id, handle_kill(chat_id, text))
+
+                    elif text.startswith("/resume"):
+                        logger.info(f"/resume from chat {chat_id}: {text}")
+                        self._send_message(chat_id, handle_resume(chat_id, text))
+
+                    elif text.startswith("/status"):
+                        logger.info(f"/status from chat {chat_id}")
+                        try:
+                            report = report_fn()
+                            kill_status = handle_kill_status()
+                            self._send_message(
+                                chat_id,
+                                f"{report.scorecard}\n\n{kill_status}",
+                            )
+                        except Exception as e:
+                            self._send_message(chat_id, f"Error: {e}")
+
+                    elif text.startswith("/update") or text.startswith("/start"):
                         logger.info(f"/update from chat {chat_id}")
                         try:
                             report = report_fn()
                             self._send_message(chat_id, report.scorecard)
                         except Exception as e:
                             self._send_message(chat_id, f"Error generating report: {e}")
+
+                    elif text.startswith("/help"):
+                        self._send_message(chat_id, (
+                            "Commands:\n"
+                            "/update — Fresh status report\n"
+                            "/status — Status + kill switch state\n"
+                            "/kill crypto|weather|all — Hard kill\n"
+                            "/resume crypto|weather|all — Resume\n"
+                            "/help — This message"
+                        ))
+
+                    else:
+                        # Check for YES/NO confirmation of pending kill/resume
+                        reply = handle_confirmation(chat_id, text)
+                        if reply:
+                            self._send_message(chat_id, reply)
 
             except requests.exceptions.ReadTimeout:
                 continue  # normal for long-polling
